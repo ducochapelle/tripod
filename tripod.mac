@@ -1,0 +1,241 @@
+! units: mm, ton, s; MPa, mm/s2, N
+! cs: beam points to x, up is z
+!
+
+
+finish
+/clear, nostart
+/view,,,-1,
+
+! design code parameters
+gamma_m = 1.15 ! [-]
+f_y = 235 ! [MPa]
+
+! ocean parameters
+depth = 50e3
+matoc = 2
+kflood = 1
+! cay = 0.0
+! caz = 0.0
+! cb = 1.0
+zmsl = depth 
+
+! wave parameters
+amplitude = 10e3 !mm
+period = 12 !s
+wavelength = 80e3 !mm
+
+
+/prep7
+MPTEMP,1,0
+MPDATA,DENS,2,,1000e-12
+
+MPTEMP,1,0 ! steel in [mm;ton;N]
+MPDATA,DENS,1,,7860e-12 
+MPDATA,EX,1,,210000 
+MPDATA,PRXY,1,,0.3
+et,1,beam188
+
+sectype,   1, beam, ctube, , 0   
+secoffset, cent 
+secdata,900,1000,12  ! ri ro n
+
+!
+!    1
+!   3 2
+!
+!
+!   978 
+!   |||
+!   645
+!   312
+!
+
+k,1,0,10e3,0
+k,2,8.7e3,-5e3,0
+k,3,-8.7e3,-5e3,0
+
+k,4,0,10e3,10e3
+k,5,8.7e3,-5e3,10e3
+k,6,-8.7e3,-5e3,10e3
+
+k,7,0,10e3,60e3
+k,8,8.7e3,-5e3,60e3
+k,9,-8.7e3,-5e3,60e3
+
+l,1,4
+l,2,5
+l,3,6
+l,4,7
+l,5,8
+l,6,9
+
+l,4,5
+l,5,6
+l,6,4
+l,7,8
+l,8,9
+l,9,7
+
+lesize, all, 1000
+lmesh, all
+
+/solu
+kbc,1
+
+acel,,,10e3
+dk,1,uz,0
+dk,2,uz,0,0,0,uy
+dk,3,uz,0,0,0,uy,ux
+
+OCTYPE,basic
+OCDATA,depth, matoc, kflood,,,,zmsl
+OCTABLE,,,.5,.5,,2 
+
+*do, angle,30,90,60
+*do,t,1,period
+
+  ! correct the time FUCKING TIME COME ON ANSYS
+  
+  OCTYPE,wave
+  OCDATA, AIRY, angle
+  OCTABLE, amplitude, period, 0, wavelength 
+
+  lswrite
+
+*enddo
+*enddo
+
+lssolve,1,24
+
+
+/post1
+
+! this is raw data to do the member checks
+/out, members, txt, 
+*vwrite, 'lc', 'l', 'e', 'fx', 'my', 'mz', 'tq', 'fz', 'fy', 'len', 'A  ', 'IYY', 'IZZ', 'IYZ', 'Di ', 'Do ', 't  '
+(17A10)
+*vwrite, '-' , '-', '-', 'N', 'Nmm', 'Nmm', 'Nmm', 'N', 'N', 'mm', 'mm2', 'mm4', 'mm4', 'mm4', 'mm ', 'mm ', 'mm '
+(17A10)
+/out
+
+*do, lc, 1, 24
+  set, lc
+  allsel
+  cm,members,lines
+  l = lsnext(0)
+  *dowhile, l
+    lsel,s,,,l
+    esll
+    e = elnext(0)
+    *dowhile, e
+      ! k factors to be manually determined with components?
+      ! k factors to be determined by line number?
+      *get, fx, elem, e, smisc, 1
+      *get, my, elem, e, smisc, 2
+      *get, mz, elem, e, smisc, 3
+      *get, tq, elem, e, smisc, 4
+      *get, fz, elem, e, smisc, 5
+      *get, fy, elem, e, smisc, 6
+      *get, scn,elem, e, attr, secn
+      *get, mat,elem, e, attr, mat
+      *get, len,line, l, leng
+      *get, A  , secp, scn, prop, area
+      *get, IYY  , secp, scn, prop, IYY
+      *get, IZZ  , secp, scn, prop, IZZ
+      *get, IYZ  , secp, scn, prop, IYZ
+      *get, Di , secp, scn, data, 1
+      *get, Do , secp, scn, data, 2
+      *get, t  , secp, scn, data, 3
+/out, members, txt,, append
+*vwrite, lc, l, e, fx, my, mz, tq, fz, fy, len, A  , IYY, IZZ, IYZ, Di , Do , t
+(3F10.0 ,14E10.2)
+/out
+      e = elnext(e)
+    *enddo
+    cmsel,,members
+    lsel,u,,,l
+    cm,members,lines
+    l = lsnext(l)
+  *enddo
+*enddo
+
+! joint checks
+! determine in pre:
+! - master-slave ?
+! determine in post:
+! - (g)ap
+! - K/Y/X
+! - yield
+! - Qf-C1, Qf-C2
+! for each kp, get all members. 
+! Determine master-member. 
+! For each slave-member
+! - wall thickness master
+! - wall thickness slave
+! - diameter slave
+! => beta, tau, gamma, 
+! ==> Qu
+! - axial stress
+! - bending stress inplane
+! - bending stress outplane
+! ==> Qf
+! - angle w/ master
+! ===> axial capacity
+! ===> bending capacity
+/out, joints, txt, 
+*vwrite, 'lc', 'k', 'e', 'sdir', 'sby', 'sbz', 'ux', 'uy', 'uz', 'Di ', 'Do ', 't'
+(12A10)
+*vwrite, '-' , '-', '-', 'MPa', 'MPa', 'MPa', '-', '-', '-', 'mm ', 'mm ', 'mm '
+(12A10)
+/out
+*do, lc, 1, 24
+  set, lc
+  allsel
+  cm,joints,kp
+  k = kpnext(0)
+  *dowhile, k
+    ksel,s,,,k
+    nslk
+    esln
+    nsle
+    e = elnext(0)
+    *dowhile, e
+      *get, scn, elem, e, attr, secn 
+      *get, Di , secp, scn, data, 1  ! Di
+      *get, Do , secp, scn, data, 2  ! Do
+      *get, t  , secp, scn, data, 3  ! t
+      *get, len, elem, e, leng
+      *get, ux , elem, e, lproj, x
+      *get, uy , elem, e, lproj, y
+      *get, uz , elem, e, lproj, z
+      ux = ux/len                    ! ux
+      uy = uy/len                    ! uy
+      uz = uz/len                    ! uz
+      *get, sdiri, elem, e, smisc, 31
+      *get, sbyti, elem, e, smisc, 32
+      *get, sbybi, elem, e, smisc, 33
+      *get, sbzti, elem, e, smisc, 34
+      *get, sbzbi, elem, e, smisc, 35
+      *get, sdirj, elem, e, smisc, 36
+      *get, sbytj, elem, e, smisc, 37
+      *get, sbybj, elem, e, smisc, 38
+      *get, sbztj, elem, e, smisc, 39
+      *get, sbzbj, elem, e, smisc, 40
+      ! sdir, sby, sbz
+      sdir = max(abs(sdiri),abs(sdirj))
+      sby = max(abs(sbyti),abs(sbybi),abs(sbytj),abs(sbybj))
+      sbz = max(abs(sbzti),abs(sbzbi),abs(sbztj),abs(sbzbj))
+/out, joints, txt,, append
+*vwrite, lc, k, e, sdir, sby, sbz, ux, uy, uz, Di , Do , t
+(3F10.0, 3E10.2, 3F10.6, 3E10.2)
+/out      
+      e = elnext(e)
+    *enddo
+    cmsel,s,joints
+    ksel,u,,,k
+    cm,joints,kp
+    k = kpnext(k)
+  *enddo
+*enddo
+finish
