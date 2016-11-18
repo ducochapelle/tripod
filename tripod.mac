@@ -10,6 +10,8 @@ finish
 ! design code parameters
 gamma_m = 1.15 ! [-]
 f_y = 235 ! [MPa]
+error = 0.0001 ! [-] joint master align 
+
 
 ! ocean parameters
 depth = 50e3
@@ -184,10 +186,10 @@ lssolve,1,24
 ! ===> axial capacity
 ! ===> bending capacity
 /out, joints, txt, 
-*vwrite, 'lc', 'k', 'e', 'sdir', 'sby', 'sbz', 'ux', 'uy', 'uz', 'Di ', 'Do ', 't'
-(12A10)
-*vwrite, '-' , '-', '-', 'MPa', 'MPa', 'MPa', '-', '-', '-', 'mm ', 'mm ', 'mm '
-(12A10)
+*vwrite, 'lc', 'k', 'e', 'sdir', 'sby', 'sbz', 'ux', 'uy', 'uz', 'theta', 'Di ', 'Do ', 't', 'mDo', 'mt'
+(14A10)
+*vwrite, '-' , '-', '-', 'MPa', 'MPa', 'MPa', '-', '-', '-', 'rad', 'mm ', 'mm ', 'mm ', 'mm ', 'mm '
+(14A10)
 /out
 *do, lc, 1, 24
   set, lc
@@ -199,19 +201,94 @@ lssolve,1,24
     nslk
     esln
     nsle
+    
+    ! M A S T E R 
+    ! -----------
+    ! 
+    ! find the ones with the biggest diameter,
+    biggest_Do = 0
     e = elnext(0)
     *dowhile, e
+      *get, scn, elem, e, attr, secn
+      *get, Do , secp, scn, data, 2
+      *if, Do, gt, biggest_Do, then
+        *if, biggest_Do, ne, 0, then
+          esel,u,,,0,e-1
+        *endif
+        biggest_Do = Do
+        master_1 = e ! if there's no better, this is it.
+        master_2 = 0
+      *elseif, Do, lt, biggest_Do, then
+        esel,u,,,e
+      *endif
+      e = elnext(e)
+    *enddo
+    ! find one that is alligned with anotherone
+    e1 = elnext(0)
+    *dowhile, e1
+      *get, len, elem, e1, leng
+      *get, n1 , elem, e1, node, 1
+      *get, n2 , elem, e1, node, 2
+      ux1 = (nx(n2)-nx(n1))/len                    
+      uy1 = (ny(n2)-ny(n1))/len                    
+      uz1 = (nz(n2)-nz(n1))/len                    
+      e2 = elnext(e1)
+      *dowhile, e2
+        *get, len, elem, e2, leng
+        *get, n1 , elem, e2, node, 1
+        *get, n2 , elem, e2, node, 2
+        ux2 = (nx(n2)-nx(n1))/len                    
+        uy2 = (ny(n2)-ny(n1))/len                    
+        uz2 = (nz(n2)-nz(n1))/len                    
+        fux = abs(ux1-ux2)
+        fuy = abs(uy1-uy2)
+        fuz = abs(uz1-uz2)
+        *if, fux, lt, error, then
+          *if, fuy, lt, error, then
+            *if, fuz, lt, error, then
+              master_1 = e1 ! if it happens, this is the one
+              master_2 = e2 ! if it doesn't, the big one is it.
+            *endif
+          *endif
+        *endif
+        e2 = elnext(e2)
+      *enddo
+      e1 = elnext(e1)
+    *enddo    
+    esln,s,1
+    
+    ! S L A V E S
+    ! -----------
+    !
+    ! the master properties
+    *get, scn, elem, master_1, attr, secn 
+    *get, mDi, secp, scn, data, 1  ! Di
+    *get, mDo, secp, scn, data, 2  ! Do
+    *get, mt , secp, scn, data, 3  ! t
+    *get, len, elem, master_1, leng
+    *get, n1 , elem, master_1, node, 1
+    *get, n2 , elem, master_1, node, 2
+    mux = (nx(n2)-nx(n1))/len                    
+    muy = (ny(n2)-ny(n1))/len                    
+    muz = (nz(n2)-nz(n1))/len                    
+    ! the individuals
+    e = elnext(0)
+    *dowhile, e
+      *if, e, eq, master_1, or, e, eq, master_2, then
+        e = elnext(e)
+        *cycle
+      *endif
       *get, scn, elem, e, attr, secn 
       *get, Di , secp, scn, data, 1  ! Di
       *get, Do , secp, scn, data, 2  ! Do
       *get, t  , secp, scn, data, 3  ! t
       *get, len, elem, e, leng
-      *get, ux , elem, e, lproj, x
-      *get, uy , elem, e, lproj, y
-      *get, uz , elem, e, lproj, z
-      ux = ux/len                    ! ux
-      uy = uy/len                    ! uy
-      uz = uz/len                    ! uz
+      *get, n1 , elem, e, node, 1
+      *get, n2 , elem, e, node, 2
+      ux = (nx(n2)-nx(n1))/len                    
+      uy = (ny(n2)-ny(n1))/len                    
+      uz = (nz(n2)-nz(n1))/len                    
+      theta = acos(mux*ux+muy*uy+muz*uz)
       *get, sdiri, elem, e, smisc, 31
       *get, sbyti, elem, e, smisc, 32
       *get, sbybi, elem, e, smisc, 33
@@ -222,16 +299,16 @@ lssolve,1,24
       *get, sbybj, elem, e, smisc, 38
       *get, sbztj, elem, e, smisc, 39
       *get, sbzbj, elem, e, smisc, 40
-      ! sdir, sby, sbz
-      sdir = max(abs(sdiri),abs(sdirj))
+      sdir = max(abs(sdiri),abs(sdirj)) ! sdir, sby, sbz
       sby = max(abs(sbyti),abs(sbybi),abs(sbytj),abs(sbybj))
       sbz = max(abs(sbzti),abs(sbzbi),abs(sbztj),abs(sbzbj))
 /out, joints, txt,, append
-*vwrite, lc, k, e, sdir, sby, sbz, ux, uy, uz, Di , Do , t
-(3F10.0, 3E10.2, 3F10.6, 3E10.2)
+*vwrite, lc, k, e, sdir, sby, sbz, ux, uy, uz, theta, Di , Do , t , mDo, mt
+(3F10.0, 3E10.2, 4F10.6, 5E10.2)
 /out      
       e = elnext(e)
     *enddo
+    
     cmsel,s,joints
     ksel,u,,,k
     cm,joints,kp
